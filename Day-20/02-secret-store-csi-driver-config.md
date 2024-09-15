@@ -11,7 +11,16 @@ export CLUSTER_NAME=keyvault-demo-cluster
 
 az account set --subscription $SUBSCRIPTION_ID
 ```
+******
+Configure workload identity
 
+$env:SUBSCRIPTION_ID="1067a851-cb15-4cdb-b22a-e7bcd46ee7af"
+$env:RESOURCE_GROUP="keyvault-demo"
+$env:UAMI="azurekeyvaultsecretsprovider-keyvault-demo-cluster"
+$env:KEYVAULT_NAME="aks-demo-rakhi"
+$env:CLUSTER_NAME="keyvault-demo-cluster"
+
+az account set --subscription $env:SUBSCRIPTION_ID
 ### Create a managed identity
 
 ```
@@ -20,7 +29,12 @@ az identity create --name $UAMI --resource-group $RESOURCE_GROUP
 export USER_ASSIGNED_CLIENT_ID="$(az identity show -g $RESOURCE_GROUP --name $UAMI --query 'clientId' -o tsv)"
 export IDENTITY_TENANT=$(az aks show --name $CLUSTER_NAME --resource-group $RESOURCE_GROUP --query identity.tenantId -o tsv)
 ```
+******
+Create a managed identity:
 
+az identity create --name $env:UAMI --resource-group $env:RESOURCE_GROUP
+$env:USER_ASSIGNED_CLIENT_ID = az identity show --resource-group $env:RESOURCE_GROUP --name $env:UAMI --query 'clientId' -o tsv
+$env:IDENTITY_TENANT = az aks show --name $env:CLUSTER_NAME --resource-group $env:RESOURCE_GROUP --query identity.tenantId -o tsv
 ### Create a role assignment that grants the workload ID access the key vault
 
 ```
@@ -28,14 +42,26 @@ export KEYVAULT_SCOPE=$(az keyvault show --name $KEYVAULT_NAME --query id -o tsv
 
 az role assignment create --role "Key Vault Administrator" --assignee $USER_ASSIGNED_CLIENT_ID --scope $KEYVAULT_SCOPE
 ```
+**********
+Create a role assignment that grants the workload ID access the key vault:
 
+# Set KEYVAULT_SCOPE variable
+$env:KEYVAULT_SCOPE = az keyvault show --name $env:KEYVAULT_NAME --query id -o tsv
+# Create role assignment
+az role assignment create --role "Key Vault Administrator" --assignee $env:USER_ASSIGNED_CLIENT_ID --scope $env:KEYVAULT_SCOPE
 ### Get the AKS cluster OIDC Issuer URL 
 
 ```
 export AKS_OIDC_ISSUER="$(az aks show --resource-group $RESOURCE_GROUP --name $CLUSTER_NAME --query "oidcIssuerProfile.issuerUrl" -o tsv)"
 echo $AKS_OIDC_ISSUER
 ```
+**********
+Get the AKS cluster OIDC Issuer URL:
 
+# Set AKS_OIDC_ISSUER variable
+$env:AKS_OIDC_ISSUER = az aks show --resource-group $env:RESOURCE_GROUP --name $env:CLUSTER_NAME --query "oidcIssuerProfile.issuerUrl" -o tsv
+# Echo the value of AKS_OIDC_ISSUER
+echo $env:AKS_OIDC_ISSUER
 ### Create the service account for the pod
 
 ```
@@ -54,6 +80,26 @@ metadata:
   namespace: ${SERVICE_ACCOUNT_NAMESPACE}
 EOF
 ```
+************
+Create the service account for the pod:
+
+$env:SERVICE_ACCOUNT_NAME = "workload-identity-sa"
+$env:SERVICE_ACCOUNT_NAMESPACE = "default"
+
+**********************************************************
+$SERVICE_ACCOUNT_NAME = "workload-identity-sa"
+$SERVICE_ACCOUNT_NAMESPACE = "default"
+$USER_ASSIGNED_CLIENT_ID = "<your-client-id>"
+
+@"
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  annotations:
+    azure.workload.identity/client-id: $USER_ASSIGNED_CLIENT_ID
+  name: $SERVICE_ACCOUNT_NAME
+  namespace: $SERVICE_ACCOUNT_NAMESPACE
+"@ | kubectl apply -f -
 
 ### Setup Federation
 
@@ -62,7 +108,24 @@ export FEDERATED_IDENTITY_NAME="aksfederatedidentity"
 
 az identity federated-credential create --name $FEDERATED_IDENTITY_NAME --identity-name $UAMI --resource-group $RESOURCE_GROUP --issuer ${AKS_OIDC_ISSUER} --subject system:serviceaccount:${SERVICE_ACCOUNT_NAMESPACE}:${SERVICE_ACCOUNT_NAME}
 ```
+********************
+Setup Federation:
 
+# Set variables
+$FEDERATED_IDENTITY_NAME = "aksfederatedidentity"
+$UAMI = "azurekeyvaultsecretsprovider-keyvault-demo-cluster"  # Replace with your User Assigned Managed Identity name
+$RESOURCE_GROUP = "keyvault-demo"  # Replace with your Resource Group name
+$AKS_OIDC_ISSUER = "https://westus.oic.prod-aks.azure.com/50258870-f6cc-4e2e-b5e6-bc0458636fbf/2e540f14-68b8-458e-a99f-5f071c47ec62/"  # Replace with your AKS OIDC Issuer URL
+$SERVICE_ACCOUNT_NAMESPACE = "default"
+$SERVICE_ACCOUNT_NAME = "workload-identity-sa"
+
+# Run the Azure CLI command using the variables
+az identity federated-credential create `
+  --name $FEDERATED_IDENTITY_NAME `
+  --identity-name $UAMI `
+  --resource-group $RESOURCE_GROUP `
+  --issuer $AKS_OIDC_ISSUER `
+  --subject "system:serviceaccount:${SERVICE_ACCOUNT_NAMESPACE}:${SERVICE_ACCOUNT_NAME}"
 ### Create the Secret Provider Class
 
 ```
@@ -92,4 +155,30 @@ spec:
     tenantId: "${IDENTITY_TENANT}"        # The tenant ID of the key vault
 EOF
 ```
+************************************************
+Create the Secret Provider Class:
 
+@"
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: azure-kvname-wi # needs to be unique per namespace
+spec:
+  provider: azure
+  parameters:
+    usePodIdentity: "false"
+    clientID: $USER_ASSIGNED_CLIENT_ID # Setting this to use workload identity
+    keyvaultName: $KEYVAULT_NAME       # Set to the name of your key vault
+    cloudName: ""                         # [OPTIONAL for Azure] if not provided, the Azure environment defaults to AzurePublicCloud
+    objects:  |
+      array:
+        - |
+          objectName: varma            # Set to the name of your secret
+          objectType: secret              # object types: secret, key, or cert
+          objectVersion: ""               # [OPTIONAL] object versions, default to latest if empty
+        - |
+          objectName: rakeshvarma                # Set to the name of your key
+          objectType: key
+          objectVersion: ""
+    tenantId: $IDENTITY_TENANT        # The tenant ID of the key vault
+"@ | kubectl apply -f -
