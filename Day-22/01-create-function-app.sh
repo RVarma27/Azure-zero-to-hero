@@ -2,14 +2,14 @@
 
 # Variable block
 let "randomIdentifier=$RANDOM*$RANDOM"
-location="eastus"
-resourceGroup="abhi-azure-functions-rg-$randomIdentifier"
+location="westus"
+resourceGroup="rakhi-azure-functions-rg-$randomIdentifier"
 tag="create-function-app-consumption-python"
-storage="abhi$randomIdentifier"
-functionApp="abhi-serverless-python-function-$randomIdentifier"
+storage="rakhi$randomIdentifier"
+functionApp="rakhi-serverless-python-function-$randomIdentifier"
 skuStorage="Standard_LRS"
 functionsVersion="4"
-pythonVersion="3.9" #Allowed values: 3.7, 3.8, and 3.9
+pythonVersion="3.12.3" #Allowed values: 3.11, 3.10, and 3.9
 
 # Create a resource group
 echo "Creating $resourceGroup in "$location"..."
